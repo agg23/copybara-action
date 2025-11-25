@@ -12,6 +12,10 @@ export class CopyBara {
   }
 
   public async run(workflow: string, copybaraOptions: string[], ref: string | number = ""): Promise<number> {
+    // If copybara_options contains a workflow name (starts with "migrate"), don't pass COPYBARA_WORKFLOW env var
+    // This allows users to specify the exact workflow name in their custom config
+    const hasWorkflowInOptions = copybaraOptions.some(opt => opt.includes("migrate") || opt.includes("copy.bara.sky"));
+
     switch (workflow) {
       case "init":
         return this.exec(
@@ -26,6 +30,10 @@ export class CopyBara {
         );
 
       default:
+        // Don't pass COPYBARA_WORKFLOW if the user is specifying the full copybara command
+        if (hasWorkflowInOptions) {
+          return this.exec([], ["--ignore-noop", ...copybaraOptions]);
+        }
         return this.exec(["-e", `COPYBARA_WORKFLOW=${workflow}`], ["--ignore-noop", ...copybaraOptions]);
     }
   }
@@ -60,6 +68,9 @@ export class CopyBara {
       dockerArgs.push(`-v`, `${hostConfig.sshKeyPath}:/root/.ssh/id_rsa`);
     }
 
+    // Check if copybara_options contains a config file path (user is providing full command)
+    const hasConfigInOptions = copybaraOptions.some(opt => opt.includes(".bara.sky"));
+
     dockerArgs.push(
       `-v`,
       `${hostConfig.knownHostsPath}:/root/.ssh/known_hosts`,
@@ -69,8 +80,14 @@ export class CopyBara {
       `${hostConfig.gitConfigPath}:/root/.gitconfig`,
       `-v`,
       `${hostConfig.gitCredentialsPath}:/root/.git-credentials`,
-      `-e`,
-      `COPYBARA_CONFIG=/root/copy.bara.sky`,
+    );
+
+    // Only set COPYBARA_CONFIG if user isn't providing config file in options
+    if (!hasConfigInOptions) {
+      dockerArgs.push(`-e`, `COPYBARA_CONFIG=/root/copy.bara.sky`);
+    }
+
+    dockerArgs.push(
       ...dockerParams,
       this.image.name,
       "copybara",
